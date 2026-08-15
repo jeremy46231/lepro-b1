@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+
+# reverse engineering working files, see research/disassembly.md to regenerate
+apk/
+xapk/
+lib/
+base/
+jadx_out/
+*.apk
+*.xapk
+*.so
+*.dex
+iot.asm
