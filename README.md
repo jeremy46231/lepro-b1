@@ -51,6 +51,12 @@ One light entity per bulb, with on/off, brightness, colour (HS), and colour temp
 The bulb pushes its full state on connect and whenever something changes it, so the
 entity stays in sync even when the bulb is changed from a physical switch or another app.
 
+A bulb that is switched off at the wall, or otherwise unreachable, shows as unavailable
+rather than disappearing, so dashboards and automations that reference it keep working.
+The entity is created whether or not the bulb has ever been seen. Reconnection happens by
+itself, backing off to a five minute ceiling while the bulb stays silent and retrying
+immediately on the first advertisement once it comes back.
+
 Colour temperature is exact, not guessed. `d4` runs 0-1000 and the app converts it with
 `kelvin = d4 * 3800 / 1000 + 2700`, so the range is 2700-6500 K with higher values
 cooler, which matches what the B1 packaging claims. If you have a model with a different
@@ -114,6 +120,17 @@ the key, then recovers the IV from the known plaintext.
 
 `research/disassembly.md` has the annotated excerpts behind each claim in `PROTOCOL.md`,
 plus the commands to regenerate everything from the published APK.
+
+## Tests
+
+`tests/test_reconnect.py` covers the reconnect policy against a fake radio. It
+needs no Home Assistant, since `device.py` only imports it for type checking:
+
+```sh
+python -m venv .venv
+.venv/bin/pip install bleak bleak-retry-connector cryptography
+.venv/bin/python tests/test_reconnect.py
+```
 
 ## A note on the security model
 
