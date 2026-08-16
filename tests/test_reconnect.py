@@ -137,6 +137,39 @@ async def test_no_device_until_advert() -> None:
     print("  unavailable with no device, connected once it advertised")
 
 
+async def test_attempts_are_serialised() -> None:
+    """Two bulbs must never have connection attempts in flight at once.
+
+    The adapter cannot bring up two LE connections while scanning; overlapping
+    attempts busy each other out and both time out forever.
+    """
+    overlap = 0
+    in_flight = 0
+
+    async def slow_fail(*args, **kwargs):
+        nonlocal overlap, in_flight
+        in_flight += 1
+        if in_flight > 1:
+            overlap += 1
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        raise OSError("le-connection-abort-by-local")
+
+    D.establish_connection = slow_fail
+    bulbs = [
+        D.LeproBulb(FakeHass(), object(), "44:1D:64:12:EA:D6"),
+        D.LeproBulb(FakeHass(), object(), "44:1D:64:14:EE:06"),
+    ]
+    for bulb in bulbs:
+        bulb.start()
+    await asyncio.sleep(1.2)
+    for bulb in bulbs:
+        await bulb.async_disconnect()
+
+    assert overlap == 0, f"{overlap} overlapping connection attempts"
+    print("  no overlapping attempts across two bulbs")
+
+
 async def test_connect_timeout() -> None:
     """A wedged connect must not hold the lock and stall commands."""
 

@@ -48,6 +48,16 @@ _RECONNECT_MAX_DELAY = 300.0
 _ABSENT_AFTER = 60.0
 
 
+# One adapter cannot bring up two LE connections at once while it is also
+# scanning. Overlapping attempts busy each other out, which the kernel reports
+# as "Opcode 0x200e failed: -16" on the connection cancel, and both time out.
+# With two bulbs retrying forever that deadlocks: neither ever wins. Holding
+# this across the whole attempt means a wedged bulb can delay the other by the
+# retry budget, which is the cheaper problem, since a bulb only needs the lock
+# until it connects and then holds its connection without it.
+_ADAPTER = asyncio.Lock()
+
+
 async def _disconnect_quietly(client: BleakClientWithServiceCache) -> None:
     with suppress(Exception):
         await client.disconnect()
@@ -143,7 +153,9 @@ class LeproBulb:
         _LOGGER.debug("%s: connecting", self._mac)
         client: BleakClientWithServiceCache | None = None
         try:
-            async with asyncio.timeout(_CONNECT_TIMEOUT):
+            # Lock first, so time spent queued behind the other bulb does not
+            # count against this attempt's budget.
+            async with _ADAPTER, asyncio.timeout(_CONNECT_TIMEOUT):
                 # Leave max_attempts at its default. BlueZ often aborts the
                 # first connect after a scan, and those retries are what make
                 # it work at all; capping them to one attempt made both bulbs
