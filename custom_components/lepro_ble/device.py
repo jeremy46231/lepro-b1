@@ -31,10 +31,12 @@ _LOGGER = logging.getLogger(__name__)
 # per command; that also keeps push state reports flowing.
 _COMMAND_TIMEOUT = 10.0
 
-# bleak gives a connect attempt 20s of its own (BLEAK_TIMEOUT), so this only has
-# to be a little longer. The point is that a wedged connect cannot sit on the
-# lock indefinitely and stall commands.
-_CONNECT_TIMEOUT = 30.0
+# A backstop, not a policy. establish_connection is allowed its full retry
+# budget, which is four attempts of 20s each, so this only exists so a wedged
+# connect cannot sit on the lock forever. Do not tighten it to bound how long
+# connecting takes: BlueZ regularly fails the first attempt after a scan and
+# needs the retries, and nothing waits on this any more.
+_CONNECT_TIMEOUT = 150.0
 
 # A bulb switched off at the wall cannot be reached at all, so back off rather
 # than hammering the adapter.
@@ -142,15 +144,16 @@ class LeproBulb:
         client: BleakClientWithServiceCache | None = None
         try:
             async with asyncio.timeout(_CONNECT_TIMEOUT):
-                # One attempt: this class already owns the retry policy, and
-                # letting establish_connection retry too nests two backoffs and
-                # turns a single failure into over a minute of blocking.
+                # Leave max_attempts at its default. BlueZ often aborts the
+                # first connect after a scan, and those retries are what make
+                # it work at all; capping them to one attempt made both bulbs
+                # permanently unavailable. Setup no longer waits on this, so
+                # the attempts cost nothing but time in a background task.
                 client = await establish_connection(
                     BleakClientWithServiceCache,
                     self._ble_device,
                     self._mac,
                     self._handle_disconnect,
-                    max_attempts=1,
                     use_services_cache=True,
                 )
                 await client.start_notify(NOTIFY_UUID, self._handle_notify)
