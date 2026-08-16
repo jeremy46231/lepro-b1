@@ -10,7 +10,11 @@ from time import monotonic
 from typing import TYPE_CHECKING
 
 from bleak.backends.device import BLEDevice
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+from bleak_retry_connector import (
+    BleakClientWithServiceCache,
+    close_stale_connections_by_address,
+    establish_connection,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -156,6 +160,14 @@ class LeproBulb:
             # Lock first, so time spent queued behind the other bulb does not
             # count against this attempt's budget.
             async with _ADAPTER, asyncio.timeout(_CONNECT_TIMEOUT):
+                # BlueZ can leave the ACL up after bleak has given up, and
+                # establish_connection deliberately reuses an already connected
+                # device, so every later attempt inherits the same half dead
+                # connection. Worse, while it is open the bulb stops
+                # advertising, so Home Assistant loses the connectable path it
+                # needs to retry and nothing ever breaks the cycle. Clear it
+                # first so each attempt starts from a real connect.
+                await close_stale_connections_by_address(self._mac)
                 # Leave max_attempts at its default. BlueZ often aborts the
                 # first connect after a scan, and those retries are what make
                 # it work at all; capping them to one attempt made both bulbs

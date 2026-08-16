@@ -8,6 +8,7 @@ directly and driven with a stub hass. Run with:
 """
 
 import asyncio
+import contextlib
 import importlib.util
 import pathlib
 import sys
@@ -38,12 +39,18 @@ class FakeHass:
         return asyncio.create_task(coro, name=name)
 
 
+async def _no_sweep(address, *args, **kwargs):
+    return None
+
+
 def shrink() -> None:
     """Production shape, test timescale."""
     D._RECONNECT_FIRST_DELAY = 0.10
     D._RECONNECT_MAX_DELAY = 0.80
     D._ABSENT_AFTER = 0.50
     D._CONNECT_TIMEOUT = 0.30
+    # No adapter here, so the real sweep has nothing to talk to.
+    D.close_stale_connections_by_address = _no_sweep
 
 
 async def advertise(bulb, period: float, duration: float) -> None:
@@ -168,6 +175,31 @@ async def test_attempts_are_serialised() -> None:
 
     assert overlap == 0, f"{overlap} overlapping connection attempts"
     print("  no overlapping attempts across two bulbs")
+
+
+async def test_stale_connection_cleared_first() -> None:
+    """Each attempt must clear a leftover ACL before connecting.
+
+    Otherwise establish_connection reuses the half dead connection, and while
+    it is open the bulb stops advertising, so nothing can ever retry it.
+    """
+    order: list[str] = []
+
+    async def sweep(address, *args, **kwargs):
+        order.append("sweep")
+
+    async def connect(*args, **kwargs):
+        order.append("connect")
+        raise OSError("nope")
+
+    D.close_stale_connections_by_address = sweep
+    D.establish_connection = connect
+    bulb = D.LeproBulb(FakeHass(), object(), MAC)
+    with contextlib.suppress(OSError):
+        await bulb._connect()
+
+    assert order == ["sweep", "connect"], order
+    print("  stale connection cleared before connecting")
 
 
 async def test_connect_timeout() -> None:
