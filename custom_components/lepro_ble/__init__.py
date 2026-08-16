@@ -24,7 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: LeproConfigEntry) -> boo
     if ble_device is None:
         raise ConfigEntryNotReady(f"Could not find Lepro bulb at {address}")
 
-    bulb = LeproBulb(ble_device, entry.data[CONF_MAC])
+    bulb = LeproBulb(hass, ble_device, entry.data[CONF_MAC])
     entry.runtime_data = bulb
 
     entry.async_on_unload(
@@ -36,10 +36,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: LeproConfigEntry) -> boo
         )
     )
 
-    try:
-        await bulb.async_connect()
-    except Exception as err:
-        raise ConfigEntryNotReady(f"Could not connect to {address}: {err}") from err
+    # Does not raise: a bulb switched off at the wall is not a setup failure, it
+    # is an unavailable entity that reconnects by itself once it advertises again.
+    await bulb.async_connect()
 
     entry.async_on_unload(bulb.async_disconnect)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
