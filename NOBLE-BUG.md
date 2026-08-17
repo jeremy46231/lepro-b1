@@ -22,10 +22,16 @@ therefore Home Assistant) sees a connected device with no services, forever.
 
 ## Why this is not the case retracted in #97
 
-#97 was withdrawn because the capture turned out to show noble's own kernel L2CAP
-workaround rather than a genuinely foreign connection. Here the two ATT clients are
-plainly two different processes, on the same connection handle, 16ms apart. `btmon`
-labels each frame with its owning process:
+The disposition on #97 was:
+
+> The captured kernel-originated connection was created for Noble by
+> `@stoprocent/bluetooth-hci-socket`'s raw-mode L2CAP workaround, not by an unrelated
+> BlueZ client. Adopting that link was therefore expected, and the proposed "ignore any
+> connection not initiated by Noble" behavior would reject the normal raw-mode path.
+
+That reading of #97's capture is not disputed here. This is a different capture. The two
+ATT clients are two different processes, on the same connection handle, 16ms apart, and
+`btmon` labels each frame with its owning process:
 
 ```
 MainThread[1914]:  < ACL Data TX: Handle 21 flags 0x00 dlen 7   #8  [hci0] 2.255791
@@ -42,6 +48,35 @@ PID 1914 is the matter.js node process. PID 12032 is `bluetoothd`. `bluetoothd` 
 the connection; noble never called `connect()` on this peripheral, and never would have,
 since matter.js scans with the Matter `FFF6` service filter and this device is a light
 bulb that does not advertise it.
+
+### The raw-mode objection does not apply to the guard below
+
+The proposal rejected on #97 was "ignore any connection not initiated by Noble". Read as
+*did noble emit the HCI command itself*, that would indeed reject the raw-mode path, and
+rejecting it would be wrong.
+
+The guard below tests something narrower: **is there a pending entry in
+`_connectionQueue` for this address**. `connect()` pushes
+`{ id, address, addressType, params }` onto that queue *before* `processNextConnection()`
+calls `hci.createLeConn()`, and the raw-mode L2CAP workaround lives inside
+`createLeConn`/`createLeConnAfterReset`. So a raw-mode connection still has its queue
+entry when the completion arrives, and is still adopted. Nothing about the normal
+raw-mode path changes.
+
+The only links rejected are ones with no pending request for that address at all, which
+cannot arise from any noble-initiated `connect()`, raw-mode or otherwise. No successful
+noble link is discarded.
+
+### Relationship to #118
+
+#118 fixes the queue bookkeeping, where an address-mismatched completion consumes the
+pending queue head. That is a real and separate bug, and it is not this one. It does not
+stop noble constructing an `AclStream` and a `Gatt` for a link it never requested, nor
+stop the `exchangeMtu()` at the end of that block. In the capture above that MTU request
+reaches the wire, on a bearer owned by another host stack, which is the whole failure.
+#118 itself declined to settle this, recording that whether noble should adopt links it
+did not initiate is a separate question. This is that question, with a capture of a
+genuinely foreign link.
 
 ## Reproduce
 
@@ -86,11 +121,15 @@ apart is present.
      return;
    }
  
-+  // Only adopt connections this process initiated. On Linux the HCI socket is
++  // Only adopt links we have a pending request for. On Linux the HCI socket is
 +  // a broadcast view of the controller, so a connection opened by BlueZ, or by
 +  // any other host stack sharing the adapter, is delivered here as well with
 +  // role 0. Adopting it attaches a second ATT client to a bearer that already
 +  // has one, and the exchangeMtu() below then races the owning stack's own.
++  //
++  // This deliberately keys on _connectionQueue rather than on who emitted the
++  // HCI command, so the raw-mode L2CAP path still qualifies: connect() queues
++  // the request before createLeConn() runs the workaround.
 +  if (status === 0) {
 +    const id = this.addressToId(address);
 +    const initiated = this._connectionQueue.some(
