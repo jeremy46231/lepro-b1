@@ -178,7 +178,14 @@ class LeproBulb:
                     self._ble_device,
                     self._mac,
                     self._handle_disconnect,
-                    use_services_cache=True,
+                    # No service cache. With it, bleak returns as soon as the
+                    # device is connected rather than waiting for a full GATT
+                    # discovery, and on a cold connection there is nothing
+                    # cached to fall back on, so the collection comes back
+                    # empty and the notify characteristic is "not found" some
+                    # 50ms after connecting. The bulbs are simple enough that
+                    # rediscovering each time costs little.
+                    use_services_cache=False,
                 )
                 await client.start_notify(NOTIFY_UUID, self._handle_notify)
         except BaseException:
