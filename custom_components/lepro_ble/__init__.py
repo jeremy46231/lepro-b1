@@ -35,7 +35,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: LeproConfigEntry) -> boo
             hass,
             lambda service_info, change: bulb.set_ble_device(service_info.device),
             {"address": address, "connectable": True},
-            bluetooth.BluetoothScanningMode.ACTIVE,
+            # Passive. Everything this integration reads, the MAC in the
+            # manufacturer data and the fact the bulb is alive, is in the
+            # advertisement itself; nothing comes from a scan response. Asking
+            # for active scanning made the adapter solicit responses it then
+            # had to process while also holding GATT connections, which it
+            # cannot keep up with.
+            bluetooth.BluetoothScanningMode.PASSIVE,
         )
     )
 
